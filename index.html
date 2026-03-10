@@ -701,7 +701,7 @@ function renderAlerts() {
   }
 
   // Fire browser notifications for danger items (once per session)
-  if (dangerCount > 0 && !window._notifsFired && Notification.permission === 'granted') {
+  if (dangerCount > 0 && !window._notifsFired && 'Notification' in window && Notification.permission === 'granted') {
     window._notifsFired = true;
     const dangerAlerts = alerts.filter(a => a.level === 'danger');
     if (dangerAlerts.length <= 3) {
