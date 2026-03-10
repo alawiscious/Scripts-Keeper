@@ -1,0 +1,1769 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<title>Rx Manager</title>
+
+<!-- PWA / iOS Home Screen -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Rx Manager">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0071e3">
+<meta name="description" content="Personal prescription drug manager with travel conflict detection">
+<link rel="manifest" href="data:application/json;base64,">
+<!-- SVG pill icon as Apple touch icon -->
+<link rel="apple-touch-icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxODAgMTgwIj48cmVjdCB3aWR0aD0iMTgwIiBoZWlnaHQ9IjE4MCIgcng9IjQwIiBmaWxsPSIjMDA3MWUzIi8+PHRleHQgeD0iOTAiIHk9IjEyMCIgZm9udC1zaXplPSIxMDAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmZmYiPvCfkoo8L3RleHQ+PC9zdmc+">
+
+<script>
+// Inline Web App Manifest (generated as blob URL)
+const manifest = {
+  name: 'Rx Manager',
+  short_name: 'Rx Manager',
+  description: 'Prescription drug manager with travel conflict detection',
+  start_url: './',
+  display: 'standalone',
+  background_color: '#f5f5f7',
+  theme_color: '#0071e3',
+  icons: [{
+    src: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxODAgMTgwIj48cmVjdCB3aWR0aD0iMTgwIiBoZWlnaHQ9IjE4MCIgcng9IjQwIiBmaWxsPSIjMDA3MWUzIi8+PHRleHQgeD0iOTAiIHk9IjEyMCIgZm9udC1zaXplPSIxMDAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmZmYiPvCfkoo8L3RleHQ+PC9zdmc+',
+    sizes: '180x180',
+    type: 'image/svg+xml',
+    purpose: 'any maskable'
+  }]
+};
+const manifestBlob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
+const manifestUrl = URL.createObjectURL(manifestBlob);
+document.querySelector('link[rel="manifest"]').href = manifestUrl;
+
+// Service Worker for offline support (inline registration)
+if ('serviceWorker' in navigator) {
+  const swCode = `
+    const CACHE_NAME = 'rx-manager-v9';
+    const SELF_URL = self.location.href.replace(/sw\\.js.*/, '');
+    self.addEventListener('install', e => {
+      e.waitUntil(
+        caches.open(CACHE_NAME).then(cache => cache.addAll(['./']))
+      );
+      self.skipWaiting();
+    });
+    self.addEventListener('activate', e => {
+      e.waitUntil(
+        caches.keys().then(keys => Promise.all(
+          keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))
+        ))
+      );
+      self.clients.claim();
+    });
+    self.addEventListener('fetch', e => {
+      e.respondWith(
+        fetch(e.request).then(resp => {
+          const clone = resp.clone();
+          caches.open(CACHE_NAME).then(c => c.put(e.request, clone));
+          return resp;
+        }).catch(() => caches.match(e.request))
+      );
+    });
+  `;
+  const swBlob = new Blob([swCode], { type: 'application/javascript' });
+  const swUrl = URL.createObjectURL(swBlob);
+  navigator.serviceWorker.register(swUrl, { scope: './' }).catch(() => {});
+}
+</script>
+<style>
+  :root {
+    --bg: #f5f5f7;
+    --card: #ffffff;
+    --primary: #0071e3;
+    --primary-hover: #0060c0;
+    --danger: #e53935;
+    --warning: #f57c00;
+    --success: #2e7d32;
+    --muted: #86868b;
+    --border: #d2d2d7;
+    --text: #1d1d1f;
+    --text-secondary: #6e6e73;
+    --radius: 12px;
+    --shadow: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.04);
+    --shadow-lg: 0 4px 12px rgba(0,0,0,.1);
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif; background:var(--bg); color:var(--text); line-height:1.5; }
+
+  .app-header { background:var(--card); border-bottom:1px solid var(--border); padding:16px 24px; display:flex; align-items:center; justify-content:space-between; position:sticky; top:0; z-index:100; }
+  .app-header h1 { font-size:20px; font-weight:600; }
+  .app-header .subtitle { color:var(--text-secondary); font-size:13px; }
+
+  .container { max-width:1100px; margin:0 auto; padding:24px; }
+
+  .dashboard { display:grid; grid-template-columns:repeat(auto-fit, minmax(200px,1fr)); gap:16px; margin-bottom:28px; }
+  .stat-card { background:var(--card); border-radius:var(--radius); padding:20px; box-shadow:var(--shadow); }
+  .stat-card .label { font-size:12px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px; }
+  .stat-card .value { font-size:28px; font-weight:600; }
+  .stat-card .value.danger { color:var(--danger); }
+  .stat-card .value.warning { color:var(--warning); }
+  .stat-card .value.success { color:var(--success); }
+
+  .section { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); margin-bottom:24px; overflow:hidden; }
+  .section-header { padding:20px 24px 16px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--border); }
+  .section-header h2 { font-size:17px; font-weight:600; }
+
+  button { cursor:pointer; border:none; border-radius:8px; font-size:13px; font-weight:500; padding:8px 16px; transition:all .15s; }
+  .btn-primary { background:var(--primary); color:#fff; }
+  .btn-primary:hover { background:var(--primary-hover); }
+  .btn-secondary { background:transparent; color:var(--primary); border:1px solid var(--primary); }
+  .btn-secondary:hover { background:rgba(0,113,227,.06); }
+  .btn-danger { background:transparent; color:var(--danger); border:1px solid var(--danger); }
+  .btn-danger:hover { background:rgba(229,57,53,.06); }
+  .btn-sm { padding:5px 10px; font-size:12px; }
+  .btn-icon { background:transparent; color:var(--text-secondary); padding:4px 8px; font-size:16px; }
+  .btn-icon:hover { color:var(--text); }
+
+  .drug-table { width:100%; border-collapse:collapse; }
+  .drug-table th { text-align:left; padding:10px 16px; font-size:11px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:.5px; font-weight:600; background:var(--bg); }
+  .drug-table td { padding:12px 16px; border-top:1px solid var(--border); font-size:14px; vertical-align:middle; }
+  .drug-table tr:hover td { background:rgba(0,113,227,.02); }
+
+  .status-badge { display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:20px; font-size:12px; font-weight:500; }
+  .status-badge.ok { background:#e8f5e9; color:var(--success); }
+  .status-badge.warning { background:#fff3e0; color:var(--warning); }
+  .status-badge.danger { background:#ffebee; color:var(--danger); }
+  .status-badge.info { background:#e3f2fd; color:var(--primary); }
+
+  .progress-bar { height:6px; background:#e0e0e0; border-radius:3px; overflow:hidden; min-width:80px; }
+  .progress-bar .fill { height:100%; border-radius:3px; transition:width .3s; }
+  .progress-bar .fill.ok { background:var(--success); }
+  .progress-bar .fill.warning { background:var(--warning); }
+  .progress-bar .fill.danger { background:var(--danger); }
+
+  /* Modal */
+  .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:200; align-items:center; justify-content:center; }
+  .modal-overlay.active { display:flex; }
+  .modal { background:var(--card); border-radius:16px; width:90%; max-width:520px; max-height:90vh; overflow-y:auto; box-shadow:var(--shadow-lg); }
+  .modal-header { padding:20px 24px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; }
+  .modal-header h3 { font-size:17px; font-weight:600; }
+  .modal-body { padding:24px; }
+  .modal-footer { padding:16px 24px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:8px; }
+
+  .form-group { margin-bottom:16px; }
+  .form-group label { display:block; font-size:13px; font-weight:500; margin-bottom:4px; color:var(--text-secondary); }
+  .form-group input, .form-group select, .form-group textarea { width:100%; padding:8px 12px; border:1px solid var(--border); border-radius:8px; font-size:14px; font-family:inherit; background:var(--card); }
+  .form-group input:focus, .form-group select:focus { outline:none; border-color:var(--primary); box-shadow:0 0 0 3px rgba(0,113,227,.12); }
+  .form-row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+
+  /* Travel section */
+  .travel-card { padding:16px 24px; border-top:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; }
+  .travel-card:first-child { border-top:none; }
+  .travel-info { display:flex; align-items:center; gap:12px; }
+  .travel-icon { width:36px; height:36px; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:18px; }
+  .travel-icon.upcoming { background:#e3f2fd; }
+  .travel-icon.conflict { background:#ffebee; }
+  .travel-dates { font-size:12px; color:var(--text-secondary); }
+  .travel-name { font-size:14px; font-weight:500; }
+
+  /* Notification Bell & Panel */
+  .notif-wrapper { position:relative; }
+  .notif-bell { background:none; border:none; font-size:20px; cursor:pointer; padding:6px; position:relative; border-radius:8px; transition:background .15s; }
+  .notif-bell:hover { background:rgba(0,0,0,.05); }
+  .notif-badge { position:absolute; top:2px; right:2px; min-width:18px; height:18px; border-radius:9px; font-size:10px; font-weight:700; color:#fff; display:flex; align-items:center; justify-content:center; padding:0 5px; }
+  .notif-badge.danger { background:var(--danger); }
+  .notif-badge.warning { background:var(--warning); }
+  .notif-badge.ok { display:none; }
+  .notif-panel { display:none; position:absolute; top:calc(100% + 8px); right:0; width:380px; max-height:440px; overflow-y:auto; background:var(--card); border-radius:var(--radius); box-shadow:0 8px 30px rgba(0,0,0,.18); z-index:200; border:1px solid var(--border); }
+  .notif-panel.open { display:block; }
+  .notif-panel-header { padding:14px 16px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; font-size:14px; font-weight:600; }
+  .notif-panel-header button { background:none; border:none; font-size:12px; color:var(--primary); cursor:pointer; padding:4px 8px; }
+  .notif-item { padding:12px 16px; border-bottom:1px solid var(--border); font-size:13px; display:flex; align-items:flex-start; gap:10px; }
+  .notif-item:last-child { border-bottom:none; }
+  .notif-item .notif-icon { flex-shrink:0; width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:13px; }
+  .notif-item .notif-icon.danger { background:#ffebee; }
+  .notif-item .notif-icon.warning { background:#fff3e0; }
+  .notif-item .notif-text { flex:1; }
+  .notif-item .notif-text strong { font-weight:600; }
+  .notif-item .notif-sub { font-size:11px; color:var(--text-secondary); margin-top:2px; }
+  .notif-empty { padding:32px 16px; text-align:center; color:var(--text-secondary); font-size:13px; }
+  .notif-footer { padding:10px 16px; border-top:1px solid var(--border); text-align:center; }
+  .notif-footer button { background:none; border:none; color:var(--primary); font-size:12px; cursor:pointer; padding:4px 8px; }
+  .notif-overlay { display:none; position:fixed; inset:0; z-index:150; }
+  .notif-overlay.open { display:block; }
+
+  /* Calendar connect */
+  .connect-section { padding:32px; text-align:center; }
+  .connect-section p { color:var(--text-secondary); font-size:14px; margin-bottom:16px; }
+
+  /* Insurance placeholder */
+  .upload-zone { border:2px dashed var(--border); border-radius:var(--radius); padding:40px; text-align:center; cursor:pointer; transition:all .15s; }
+  .upload-zone:hover { border-color:var(--primary); background:rgba(0,113,227,.02); }
+  .upload-zone .icon { font-size:32px; margin-bottom:8px; }
+  .upload-zone .label { font-size:14px; color:var(--text-secondary); }
+
+  .tabs { display:flex; gap:4px; padding:0 24px; background:var(--card); border-bottom:1px solid var(--border); }
+  .tab { padding:12px 16px; font-size:13px; font-weight:500; color:var(--text-secondary); cursor:pointer; border-bottom:2px solid transparent; transition:all .15s; background:none; border-radius:0; }
+  .tab.active { color:var(--primary); border-bottom-color:var(--primary); }
+  .tab:hover { color:var(--text); }
+
+  .empty-state { padding:40px; text-align:center; color:var(--text-secondary); font-size:14px; }
+
+  /* Gantt Timeline */
+  .gantt-wrap { padding:16px 24px; overflow-x:auto; }
+  .gantt-legend { display:flex; gap:16px; flex-wrap:wrap; margin-bottom:16px; font-size:12px; color:var(--text-secondary); align-items:center; }
+  .gantt-legend-item { display:flex; align-items:center; gap:5px; }
+  .gantt-legend-swatch { width:14px; height:14px; border-radius:3px; flex-shrink:0; }
+  .gantt-container { position:relative; min-width:900px; }
+  .gantt-header { display:flex; border-bottom:2px solid var(--border); padding-bottom:4px; margin-bottom:0; position:relative; }
+  .gantt-label-col { width:180px; flex-shrink:0; font-size:11px; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:.5px; padding:4px 0; }
+  .gantt-chart-col { flex:1; position:relative; display:flex; }
+  .gantt-month { flex:1; text-align:center; font-size:11px; font-weight:600; color:var(--text-secondary); padding:4px 0; border-left:1px solid var(--border); }
+  .gantt-month:first-child { border-left:none; }
+  .gantt-body { position:relative; }
+  .gantt-row { display:flex; border-bottom:1px solid var(--border); min-height:40px; align-items:center; position:relative; }
+  .gantt-row:hover { background:rgba(0,113,227,.02); }
+  .gantt-row-label { width:180px; flex-shrink:0; font-size:12px; font-weight:500; padding:8px 8px 8px 0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .gantt-row-label small { display:block; font-size:10px; color:var(--text-secondary); font-weight:400; }
+  .gantt-row-chart { flex:1; position:relative; height:40px; }
+  /* Month grid lines */
+  .gantt-grid-line { position:absolute; top:0; bottom:0; width:1px; background:var(--border); z-index:0; }
+  /* Today marker */
+  .gantt-today { position:absolute; top:0; bottom:0; width:2px; background:var(--primary); z-index:5; opacity:.6; }
+  .gantt-today::after { content:'Today'; position:absolute; top:-18px; left:50%; transform:translateX(-50%); font-size:9px; font-weight:600; color:var(--primary); white-space:nowrap; }
+  /* Supply bars */
+  .gantt-bar { position:absolute; height:20px; top:10px; border-radius:4px; z-index:2; min-width:2px; cursor:default; transition:opacity .15s; }
+  .gantt-bar:hover { opacity:.85; }
+  .gantt-bar.ok { background:linear-gradient(90deg, var(--success), #43a047); }
+  .gantt-bar.warning { background:linear-gradient(90deg, var(--warning), #fb8c00); }
+  .gantt-bar.danger { background:linear-gradient(90deg, var(--danger), #e53935); }
+  .gantt-bar.prn { background:repeating-linear-gradient(45deg, #90caf9, #90caf9 4px, #bbdefb 4px, #bbdefb 8px); }
+  /* Trip bands */
+  .gantt-trip-band { position:absolute; top:0; bottom:0; z-index:1; border-radius:0; border-left:2px solid rgba(30,136,229,.5); border-right:2px solid rgba(30,136,229,.5); }
+  .gantt-trip-band.even { background:rgba(30,136,229,.06); }
+  .gantt-trip-band.odd { background:rgba(156,39,176,.06); border-left-color:rgba(156,39,176,.4); border-right-color:rgba(156,39,176,.4); }
+  .gantt-trip-label { position:absolute; top:2px; left:4px; font-size:9px; font-weight:600; color:rgba(30,136,229,.7); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:calc(100% - 8px); z-index:3; }
+  .gantt-trip-band.odd .gantt-trip-label { color:rgba(156,39,176,.7); }
+  /* Freeze zone */
+  .gantt-freeze { position:absolute; top:0; bottom:0; z-index:1; background:repeating-linear-gradient(45deg, transparent, transparent 3px, rgba(255,152,0,.06) 3px, rgba(255,152,0,.06) 6px); border-left:1px dashed var(--warning); }
+  /* Conflict markers */
+  .gantt-conflict { position:absolute; top:6px; width:16px; height:16px; z-index:4; font-size:12px; line-height:16px; text-align:center; cursor:pointer; filter:drop-shadow(0 1px 2px rgba(0,0,0,.2)); }
+  /* Tooltip */
+  .gantt-tip { position:absolute; z-index:100; background:#1a1a2e; color:#fff; padding:8px 12px; border-radius:8px; font-size:11px; line-height:1.4; pointer-events:none; white-space:nowrap; box-shadow:0 4px 12px rgba(0,0,0,.25); max-width:260px; white-space:normal; }
+  .gantt-tip::after { content:''; position:absolute; bottom:-5px; left:50%; transform:translateX(-50%); border-left:5px solid transparent; border-right:5px solid transparent; border-top:5px solid #1a1a2e; }
+  /* Section dividers in Gantt */
+  .gantt-section-label { display:flex; align-items:center; padding:6px 0; font-size:10px; font-weight:700; color:var(--text-secondary); text-transform:uppercase; letter-spacing:.8px; border-bottom:1px solid var(--border); }
+  .gantt-section-label span { padding-right:12px; }
+
+  .gcal-btn { display:inline-flex; align-items:center; gap:8px; padding:10px 20px; background:#fff; border:1px solid var(--border); border-radius:8px; font-size:14px; font-weight:500; cursor:pointer; transition:all .15s; }
+  .gcal-btn:hover { box-shadow:var(--shadow); }
+  .gcal-btn img { width:18px; height:18px; }
+
+  /* iOS safe-area padding for notch/home-bar */
+  body { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+
+  @media(max-width:768px) {
+    .form-row { grid-template-columns:1fr; }
+    .drug-table { font-size:12px; }
+    .drug-table th, .drug-table td { padding:8px 10px; }
+    .dashboard { grid-template-columns:1fr 1fr; }
+    .notif-panel { width:calc(100vw - 32px); right:-8px; }
+    .gantt-label-col, .gantt-row-label { width:120px; font-size:11px; }
+    .gantt-wrap { padding:12px 12px; }
+    .gantt-legend { gap:10px; font-size:11px; }
+  }
+  @media(max-width:420px) {
+    .dashboard { grid-template-columns:1fr; }
+    .tabs { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+    .tab { white-space:nowrap; padding:10px 12px; font-size:12px; }
+    .gantt-label-col, .gantt-row-label { width:90px; font-size:10px; }
+    .gantt-container { min-width:600px; }
+    .section-header { padding:12px 16px; flex-wrap:wrap; gap:8px; }
+  }
+  @media(display-mode: standalone) {
+    /* When running as installed PWA */
+    body { padding-top: env(safe-area-inset-top); }
+  }
+</style>
+</head>
+<body>
+
+<div class="app-header">
+  <div>
+    <h1>💊 Rx Manager</h1>
+    <div class="subtitle">Prescription tracking with travel-aware renewals</div>
+  </div>
+  <div style="display:flex;gap:8px;align-items:center;">
+    <div class="notif-wrapper">
+      <button class="notif-bell" onclick="toggleNotifPanel()" title="Alerts & Notifications" id="notifBell">🔔<span class="notif-badge ok" id="notifBadge">0</span></button>
+      <div class="notif-overlay" id="notifOverlay" onclick="toggleNotifPanel()"></div>
+      <div class="notif-panel" id="notifPanel">
+        <div class="notif-panel-header">
+          <span>Alerts</span>
+          <button onclick="enableBrowserNotifications()">🔔 Enable Reminders</button>
+        </div>
+        <div id="notifList"></div>
+        <div class="notif-footer" id="notifFooter" style="display:none;">
+          <button onclick="dismissAllAlerts()">Dismiss All</button>
+        </div>
+      </div>
+    </div>
+    <button class="btn-secondary btn-sm" onclick="exportData()">Export</button>
+    <button class="btn-secondary btn-sm" onclick="importData()">Import</button>
+  </div>
+</div>
+
+<div class="container">
+  <!-- Dashboard Stats -->
+  <div class="dashboard" id="dashboard"></div>
+
+  <!-- Main Tabs -->
+  <div class="section">
+    <div class="tabs">
+      <div class="tab active" data-tab="medications" onclick="switchTab('medications')">Medications</div>
+      <div class="tab" data-tab="timeline" onclick="switchTab('timeline')">Timeline</div>
+      <div class="tab" data-tab="travel" onclick="switchTab('travel')">Travel</div>
+      <div class="tab" data-tab="insurance" onclick="switchTab('insurance')">Insurance</div>
+    </div>
+
+    <!-- Medications Tab -->
+    <div id="tab-medications">
+      <div class="section-header" style="border-bottom:none;">
+        <div></div>
+        <button class="btn-primary" onclick="openAddDrug()">+ Add Medication</button>
+      </div>
+      <div id="drugList"></div>
+    </div>
+
+    <!-- Timeline Tab -->
+    <div id="tab-timeline" style="display:none;">
+      <div id="timelineContent" class="gantt-wrap"></div>
+    </div>
+
+    <!-- Travel Tab -->
+    <div id="tab-travel" style="display:none;">
+      <div class="section-header" style="border-bottom:none;">
+        <div id="tripItStatus" style="font-size:12px;color:var(--text-secondary);"></div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn-secondary btn-sm" onclick="openAddTrip()">+ Add Trip Manually</button>
+          <button class="btn-secondary btn-sm" onclick="syncTripIt()">🔄 Re-sync TripIt</button>
+        </div>
+      </div>
+      <div id="travelList"></div>
+    </div>
+
+    <!-- Insurance Tab -->
+    <div id="tab-insurance" style="display:none;">
+      <div style="padding:24px;">
+        <div id="insuranceContent">
+          <div class="upload-zone" onclick="document.getElementById('policyUpload').click()">
+            <div class="icon">📋</div>
+            <div class="label">Drop your travel insurance policy here<br><small>or click to browse — PDF, DOCX supported</small></div>
+            <input type="file" id="policyUpload" accept=".pdf,.docx,.doc,.txt" style="display:none;" onchange="handlePolicyUpload(event)">
+          </div>
+          <div style="margin-top:16px;padding:16px;background:var(--bg);border-radius:var(--radius);font-size:13px;color:var(--text-secondary);">
+            <strong style="color:var(--text);">How this works:</strong><br>
+            Once you upload your travel insurance policy, we'll extract the relevant rules about prescription medication changes — such as mandatory stability periods (e.g., "no changes within 90 days of travel") — and automatically flag conflicts with your renewal dates and upcoming trips.
+          </div>
+          <div id="policyRules" style="margin-top:16px;display:none;"></div>
+          <div style="margin-top:16px;">
+            <h4 style="font-size:14px;margin-bottom:8px;">Manual Policy Rules</h4>
+            <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px;">You can also set rules manually while waiting for your policy documents.</p>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Stability window (days before travel)</label>
+                <input type="number" id="stabilityWindow" value="90" min="0" max="365">
+              </div>
+              <div class="form-group">
+                <label>Rule description</label>
+                <input type="text" id="stabilityRule" placeholder="e.g., No Rx changes within 90 days of departure">
+              </div>
+            </div>
+            <button class="btn-primary btn-sm" onclick="saveInsuranceRule()">Save Rule</button>
+          </div>
+          <div id="savedRules" style="margin-top:16px;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Add/Edit Drug Modal -->
+<div class="modal-overlay" id="drugModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="drugModalTitle">Add Medication</h3>
+      <button class="btn-icon" onclick="closeModal('drugModal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="drugEditId">
+      <div class="form-group">
+        <label>Medication Name</label>
+        <input type="text" id="drugName" placeholder="e.g., Atorvastatin (Lipitor)">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Dosage</label>
+          <input type="text" id="drugDosage" placeholder="e.g., 20mg">
+        </div>
+        <div class="form-group">
+          <label>Frequency</label>
+          <select id="drugFrequency">
+            <option value="1">Once daily</option>
+            <option value="2">Twice daily</option>
+            <option value="3">Three times daily</option>
+            <option value="0.5">Every other day</option>
+            <option value="0.142857">Once weekly</option>
+            <option value="0">As needed / PRN</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Current Pill Count</label>
+          <input type="number" id="drugPillCount" min="0" placeholder="e.g., 45">
+        </div>
+        <div class="form-group">
+          <label>Count as of Date</label>
+          <input type="date" id="drugCountDate">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Refills Remaining</label>
+          <input type="number" id="drugRefills" min="0" placeholder="e.g., 3">
+        </div>
+        <div class="form-group">
+          <label>Pills per Refill</label>
+          <input type="number" id="drugPillsPerRefill" min="1" placeholder="e.g., 90">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Pharmacy</label>
+          <input type="text" id="drugPharmacy" placeholder="e.g., Shoppers Drug Mart">
+        </div>
+        <div class="form-group">
+          <label>Prescribing Doctor</label>
+          <input type="text" id="drugDoctor" placeholder="e.g., Dr. Smith">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Renewal Lead Time (days before running out)</label>
+        <input type="number" id="drugLeadTime" value="14" min="0" max="90">
+      </div>
+      <div class="form-group">
+        <label>Notes</label>
+        <textarea id="drugNotes" rows="2" placeholder="e.g., Take with food, avoid grapefruit"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeModal('drugModal')">Cancel</button>
+      <button class="btn-primary" onclick="saveDrug()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Trip Modal -->
+<div class="modal-overlay" id="tripModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Add Trip</h3>
+      <button class="btn-icon" onclick="closeModal('tripModal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>Trip Name / Destination</label>
+        <input type="text" id="tripName" placeholder="e.g., London Business Trip">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Departure Date</label>
+          <input type="date" id="tripStart">
+        </div>
+        <div class="form-group">
+          <label>Return Date</label>
+          <input type="date" id="tripEnd">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Notes</label>
+        <textarea id="tripNotes" rows="2" placeholder="e.g., International travel, need extra supply"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeModal('tripModal')">Cancel</button>
+      <button class="btn-primary" onclick="saveTrip()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Refill Modal -->
+<div class="modal-overlay" id="refillModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Record Refill</h3>
+      <button class="btn-icon" onclick="closeModal('refillModal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="refillDrugId">
+      <div class="form-group">
+        <label>Medication</label>
+        <div id="refillDrugName" style="font-size:16px;font-weight:500;padding:4px 0;"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Pills Received</label>
+          <input type="number" id="refillPills" min="1">
+        </div>
+        <div class="form-group">
+          <label>Refill Date</label>
+          <input type="date" id="refillDate">
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeModal('refillModal')">Cancel</button>
+      <button class="btn-primary" onclick="recordRefill()">Record Refill</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ====================== STATE ======================
+const STATE_KEY = 'rxManagerState';
+
+let state = loadState();
+
+function defaultState() {
+  return {
+    drugs: [],
+    trips: [],
+    insuranceRules: [],
+    policyUploaded: false,
+    calendarConnected: false,
+    dismissedAlerts: [],
+    nextId: 1
+  };
+}
+
+const EMBEDDED_DATA = {
+  "drugs": [
+    {
+      "id": 1,
+      "name": "Atorvastatin Ca 10mg",
+      "dosage": "10mg",
+      "frequency": "1",
+      "pillCount": 56,
+      "countDate": "2026-03-07",
+      "refills": 5,
+      "pillsPerRefill": 90,
+      "pharmacy": "Shoppers Drug Mart — Bayview & Fleming",
+      "doctor": "Dr. V. Wong",
+      "leadTime": 14,
+      "notes": "ATORVASTATIN · Rx #9800919 · Cholesterol — take 1 daily (with 20mg tab = 30mg total)"
+    },
+    {
+      "id": 2,
+      "name": "Atorvastatin Ca 20mg",
+      "dosage": "20mg",
+      "frequency": "1",
+      "pillCount": 89,
+      "countDate": "2026-03-07",
+      "refills": 4,
+      "pillsPerRefill": 90,
+      "pharmacy": "Shoppers Drug Mart — Bayview & Fleming",
+      "doctor": "Dr. V. Wong",
+      "leadTime": 14,
+      "notes": "ATORVASTATIN · Rx #9802778 · Cholesterol — take 1 daily (with 10mg tab = 30mg total)"
+    },
+    {
+      "id": 3,
+      "name": "Lisdexamfetamine 10mg",
+      "dosage": "10mg",
+      "frequency": "1",
+      "pillCount": 12,
+      "countDate": "2026-03-07",
+      "refills": 0,
+      "pillsPerRefill": 30,
+      "pharmacy": "Shoppers Drug Mart — Bayview & Fleming",
+      "doctor": "Dr. V. Wong",
+      "leadTime": 14,
+      "notes": "VYVANSE (TEVA) · Rx #9800709 · ADHD — pink capsule. Take 1 morning with 20mg cap (30mg total). 0 refills — needs new Rx"
+    },
+    {
+      "id": 4,
+      "name": "Lisdexamfetamine 20mg",
+      "dosage": "20mg",
+      "frequency": "1",
+      "pillCount": 12,
+      "countDate": "2026-03-07",
+      "refills": 0,
+      "pillsPerRefill": 30,
+      "pharmacy": "Shoppers Drug Mart — Bayview & Fleming",
+      "doctor": "Dr. V. Wong",
+      "leadTime": 14,
+      "notes": "VYVANSE (TEVA) · Rx #9800701 · ADHD — yellow capsule. Take 1 morning with 10mg cap (30mg total). 0 refills — needs new Rx"
+    },
+    {
+      "id": 5,
+      "name": "Tadalafil (Cialis) 5mg",
+      "dosage": "5mg",
+      "frequency": "1",
+      "pillCount": 75,
+      "countDate": "2026-03-07",
+      "refills": 0,
+      "pillsPerRefill": 90,
+      "pharmacy": "Shoppers Drug Mart — Bayview & Fleming",
+      "doctor": "",
+      "leadTime": 14,
+      "notes": "CIALIS · Daily use — not on Shoppers file, check Rx source"
+    },
+    {
+      "id": 6,
+      "name": "Perindopril Erbumine 4mg",
+      "dosage": "4mg",
+      "frequency": "1",
+      "pillCount": 60,
+      "countDate": "2026-03-07",
+      "refills": 3,
+      "pillsPerRefill": 90,
+      "pharmacy": "Shoppers Drug Mart — Bayview & Fleming",
+      "doctor": "",
+      "leadTime": 14,
+      "notes": "PERINDOPRIL · Rx #9799088 · Blood pressure"
+    },
+    {
+      "id": 7,
+      "name": "Ranitidine HCl 150mg",
+      "dosage": "150mg",
+      "frequency": "0",
+      "pillCount": 180,
+      "countDate": "2026-03-07",
+      "refills": 2,
+      "pillsPerRefill": 180,
+      "pharmacy": "Shoppers Drug Mart — Bayview & Fleming",
+      "doctor": "",
+      "leadTime": 14,
+      "notes": "MAR-RANITIDINE · Rx #9737628 · Acid reflux — taken as needed (PRN)"
+    },
+    {
+      "id": 8,
+      "name": "Apixaban 5mg",
+      "dosage": "5mg",
+      "frequency": "2",
+      "pillCount": 160,
+      "countDate": "2026-03-07",
+      "refills": 2,
+      "pillsPerRefill": 194,
+      "pharmacy": "Shoppers Drug Mart — Bayview & Fleming",
+      "doctor": "Dr. S. Shadowitz",
+      "leadTime": 14,
+      "notes": "APIXABAN · Rx #9804085 · Blood thinner — 1 tab (5mg) twice daily (post loading dose). Rx qty 194"
+    },
+    {
+      "id": 9,
+      "name": "Tirzepatide 12.5mg/0.5ml",
+      "dosage": "12.5mg/0.5ml",
+      "frequency": "0",
+      "pillCount": 0,
+      "countDate": "2026-03-07",
+      "refills": 2,
+      "pillsPerRefill": 1,
+      "pharmacy": "Shoppers Drug Mart — Bayview & Fleming",
+      "doctor": "",
+      "leadTime": 14,
+      "notes": "MOUNJARO KWIKPEN · Rx #9802462 · Weekly injection — track refills only. READY FOR PICKUP at Shoppers"
+    },
+    {
+      "id": 10,
+      "name": "Zoster Vaccine (Shingrix)",
+      "dosage": "Vaccine",
+      "frequency": "0",
+      "pillCount": 0,
+      "countDate": "2026-03-07",
+      "refills": 1,
+      "pillsPerRefill": 1,
+      "pharmacy": "Shoppers Drug Mart — Bayview & Fleming",
+      "doctor": "",
+      "leadTime": 14,
+      "notes": "SHINGRIX · Rx #9714073 · Dose 2 overdue since Feb 1, 2026 — schedule appointment"
+    },
+    {
+      "id": 11,
+      "name": "Tretinoin 0.05%",
+      "dosage": "0.05% cream",
+      "frequency": "0",
+      "pillCount": 0,
+      "countDate": "2026-03-07",
+      "refills": 6,
+      "pillsPerRefill": 1,
+      "pharmacy": "Shoppers Drug Mart — Bayview & Fleming",
+      "doctor": "",
+      "leadTime": 14,
+      "notes": "RETIN-A · Rx #9771014 · Skin — refill when needed"
+    },
+    {
+      "id": 12,
+      "name": "Mometasone/Olopatadine",
+      "dosage": "25/665mcg",
+      "frequency": "0",
+      "pillCount": 0,
+      "countDate": "2026-03-07",
+      "refills": 5,
+      "pillsPerRefill": 1,
+      "pharmacy": "Shoppers Drug Mart — Bayview & Fleming",
+      "doctor": "",
+      "leadTime": 14,
+      "notes": "RYALTRIS NASAL SPRAY · Rx #9738467 · Nasal spray — seasonal/as needed"
+    },
+    {
+      "id": 13,
+      "name": "Efinaconazole 10%",
+      "dosage": "10% topical",
+      "frequency": "0",
+      "pillCount": 0,
+      "countDate": "2026-03-07",
+      "refills": 2,
+      "pillsPerRefill": 1,
+      "pharmacy": "Shoppers Drug Mart — Bayview & Fleming",
+      "doctor": "",
+      "leadTime": 14,
+      "notes": "JUBLIA · Rx #9714041 · Antifungal topical — refill if still needed"
+    },
+    {
+      "id": 14,
+      "name": "Terbinafine HCl 250mg",
+      "dosage": "250mg",
+      "frequency": "0",
+      "pillCount": 0,
+      "countDate": "2026-03-07",
+      "refills": 3,
+      "pillsPerRefill": 28,
+      "pharmacy": "Shoppers Drug Mart — Bayview & Fleming",
+      "doctor": "",
+      "leadTime": 14,
+      "notes": "TERBINAFINE · Rx #9715415 · Antifungal oral — likely completed course"
+    }
+  ],
+  "trips": [
+    {
+      "id": 15,
+      "name": "Art Basel",
+      "startDate": "2025-12-05",
+      "endDate": "2025-12-09",
+      "notes": "Miami, FL",
+      "source": "tripit"
+    },
+    {
+      "id": 16,
+      "name": "Sint Maarten",
+      "startDate": "2025-12-27",
+      "endDate": "2026-01-04",
+      "notes": "Sint Maarten, Netherlands",
+      "source": "tripit"
+    },
+    {
+      "id": 17,
+      "name": "Nassau, Bahamas",
+      "startDate": "2026-02-05",
+      "endDate": "2026-02-10",
+      "notes": "Nassau, Bahamas",
+      "source": "tripit"
+    },
+    {
+      "id": 18,
+      "name": "Blue Mountain Skiing",
+      "startDate": "2026-02-12",
+      "endDate": "2026-02-17",
+      "notes": "The Blue Mountains, ON",
+      "source": "tripit"
+    },
+    {
+      "id": 19,
+      "name": "Beaver, UT — Ski with Guillons",
+      "startDate": "2026-02-21",
+      "endDate": "2026-02-25",
+      "notes": "Beaver, UT",
+      "source": "tripit"
+    },
+    {
+      "id": 20,
+      "name": "Zermatt, Switzerland — Skiing",
+      "startDate": "2026-03-13",
+      "endDate": "2026-03-22",
+      "notes": "Zermatt & Zurich, Switzerland",
+      "source": "tripit"
+    },
+    {
+      "id": 21,
+      "name": "Aaron's 50th — Tortola + Miami",
+      "startDate": "2026-03-23",
+      "endDate": "2026-03-29",
+      "notes": "Tortola, BVI → Miami, FL",
+      "source": "tripit"
+    },
+    {
+      "id": 22,
+      "name": "Hawaii",
+      "startDate": "2026-04-27",
+      "endDate": "2026-05-08",
+      "notes": "Honolulu, HI",
+      "source": "tripit"
+    },
+    {
+      "id": 23,
+      "name": "Ibiza + Vienna",
+      "startDate": "2026-06-23",
+      "endDate": "2026-07-01",
+      "notes": "Ibiza, Spain → Vienna, Austria",
+      "source": "tripit"
+    },
+    {
+      "id": 24,
+      "name": "Osheaga 2026",
+      "startDate": "2026-07-30",
+      "endDate": "2026-08-04",
+      "notes": "Montreal, QC",
+      "source": "tripit"
+    }
+  ],
+  "insuranceRules": [],
+  "policyUploaded": false,
+  "calendarConnected": false,
+  "dismissedAlerts": [],
+  "nextId": 25,
+  "seedVersion": 10,
+  "tripItUrl": "https://www.tripit.com/feed/ical/private/F6B6210D-7A998DD450496D2D04C3D817BB19FDDA/tripit.ics",
+  "tripItLastSync": "2026-03-09"
+};
+
+function loadState() {
+  try {
+    const s = localStorage.getItem(STATE_KEY);
+    if (s) return { ...defaultState(), ...JSON.parse(s) };
+    return { ...defaultState(), ...EMBEDDED_DATA };
+  } catch { return { ...defaultState(), ...EMBEDDED_DATA }; }
+}
+
+function saveState() {
+  localStorage.setItem(STATE_KEY, JSON.stringify(state));
+}
+
+function genId() { return state.nextId++; }
+
+// ====================== DATE HELPERS ======================
+function today() { return new Date().toISOString().split('T')[0]; }
+function daysBetween(a, b) { return Math.ceil((new Date(b) - new Date(a)) / 86400000); }
+function addDays(dateStr, n) { const d = new Date(dateStr); d.setDate(d.getDate() + n); return d.toISOString().split('T')[0]; }
+function formatDate(d) { if (!d) return '—'; return new Date(d + 'T12:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }); }
+
+// ====================== DRUG CALCULATIONS ======================
+function calcDrugStatus(drug) {
+  const now = today();
+  const daysSinceCount = daysBetween(drug.countDate, now);
+  const pillsUsed = Math.floor(daysSinceCount * parseFloat(drug.frequency));
+  const currentPills = Math.max(0, drug.pillCount - pillsUsed);
+  const dailyRate = parseFloat(drug.frequency);
+  const daysLeft = dailyRate > 0 ? Math.floor(currentPills / dailyRate) : Infinity;
+  const runOutDate = daysLeft === Infinity ? null : addDays(now, daysLeft);
+  const renewByDate = daysLeft === Infinity ? null : addDays(now, Math.max(0, daysLeft - drug.leadTime));
+  const supplyPct = drug.pillCount > 0 ? (currentPills / drug.pillCount) * 100 : 0;
+
+  let status = 'ok';
+  if (daysLeft <= 7) status = 'danger';
+  else if (daysLeft <= drug.leadTime) status = 'warning';
+
+  return { currentPills, daysLeft, runOutDate, renewByDate, supplyPct, status, dailyRate };
+}
+
+// ====================== TRAVEL CONFLICT DETECTION ======================
+function getConflicts() {
+  const conflicts = [];
+  const rules = state.insuranceRules;
+  const stabilityDays = rules.length > 0 ? Math.max(...rules.map(r => r.windowDays || 90)) : 90;
+
+  const now = today();
+  state.trips.filter(trip => trip.endDate >= now).forEach(trip => {
+    const freezeStart = addDays(trip.startDate, -stabilityDays);
+    state.drugs.forEach(drug => {
+      const ds = calcDrugStatus(drug);
+      if (ds.daysLeft === Infinity) return; // skip PRN/as-needed meds
+      // If drug runs out during trip
+      if (ds.runOutDate >= trip.startDate && ds.runOutDate <= trip.endDate) {
+        conflicts.push({ type: 'runout_during_trip', drug, trip, message: `${drug.name} runs out during ${trip.name}` });
+      }
+      // If renewal falls within stability window
+      if (ds.renewByDate >= freezeStart && ds.renewByDate <= trip.startDate) {
+        conflicts.push({ type: 'renewal_in_freeze', drug, trip, message: `${drug.name} renewal falls within ${stabilityDays}-day stability window before ${trip.name}` });
+      }
+      // Not enough supply for trip duration
+      const tripDays = daysBetween(trip.startDate, trip.endDate);
+      const pillsNeededForTrip = Math.ceil(tripDays * ds.dailyRate);
+      if (ds.currentPills < pillsNeededForTrip && ds.runOutDate < trip.endDate) {
+        conflicts.push({ type: 'insufficient_for_trip', drug, trip, message: `Not enough ${drug.name} to cover ${trip.name} (need ${pillsNeededForTrip}, have ~${ds.currentPills})` });
+      }
+    });
+  });
+  return conflicts;
+}
+
+// ====================== RENDERING ======================
+function render() {
+  renderDashboard();
+  renderAlerts();
+  renderDrugList();
+  renderTimeline();
+  renderTravelList();
+  renderInsuranceRules();
+  updateTripItStatus();
+  saveState();
+}
+
+function renderDashboard() {
+  const el = document.getElementById('dashboard');
+  const total = state.drugs.length;
+  let urgent = 0, warning = 0, ok = 0;
+  state.drugs.forEach(d => {
+    const s = calcDrugStatus(d).status;
+    if (s === 'danger') urgent++;
+    else if (s === 'warning') warning++;
+    else ok++;
+  });
+  const conflicts = getConflicts().length;
+  const nextTrip = state.trips.filter(t => t.startDate >= today()).sort((a,b) => a.startDate.localeCompare(b.startDate))[0];
+
+  el.innerHTML = `
+    <div class="stat-card"><div class="label">Medications</div><div class="value">${total}</div></div>
+    <div class="stat-card"><div class="label">Need Renewal</div><div class="value ${urgent > 0 ? 'danger' : 'success'}">${urgent + warning}</div></div>
+    <div class="stat-card"><div class="label">Travel Conflicts</div><div class="value ${conflicts > 0 ? 'danger' : 'success'}">${conflicts}</div></div>
+    <div class="stat-card"><div class="label">Next Trip</div><div class="value" style="font-size:16px;">${nextTrip ? `${nextTrip.name}<br><span style="font-size:12px;color:var(--text-secondary)">${formatDate(nextTrip.startDate)}</span>` : '<span style="color:var(--muted);font-size:14px;">None</span>'}</div></div>
+  `;
+}
+
+function renderAlerts() {
+  const alerts = [];
+  const conflicts = getConflicts();
+  const dismissed = state.dismissedAlerts || [];
+
+  state.drugs.forEach(d => {
+    const s = calcDrugStatus(d);
+    if (s.status === 'danger') {
+      const key = `danger-${d.id}`;
+      if (!dismissed.includes(key)) {
+        alerts.push({ level:'danger', key, icon:'⚠️', title: d.name, detail: `Runs out in ${s.daysLeft} day${s.daysLeft!==1?'s':''}! Renew immediately.`, sub: `${s.currentPills} pills left · ${d.refills} refills` });
+      }
+    }
+  });
+  conflicts.forEach(c => {
+    const key = `conflict-${c.drug.id}-${c.trip.id}-${c.type}`;
+    if (!dismissed.includes(key)) {
+      const level = c.type === 'renewal_in_freeze' ? 'warning' : 'danger';
+      alerts.push({ level, key, icon: level === 'danger' ? '⚠️' : '⚡', title: c.drug.name, detail: c.message, sub: `${formatDate(c.trip.startDate)} — ${c.trip.name}` });
+    }
+  });
+
+  // Update badge
+  const badge = document.getElementById('notifBadge');
+  const bell = document.getElementById('notifBell');
+  const dangerCount = alerts.filter(a => a.level === 'danger').length;
+  const totalCount = alerts.length;
+
+  if (totalCount === 0) {
+    badge.className = 'notif-badge ok';
+    badge.textContent = '';
+  } else {
+    badge.className = 'notif-badge ' + (dangerCount > 0 ? 'danger' : 'warning');
+    badge.textContent = totalCount;
+  }
+
+  // Render panel items
+  const listEl = document.getElementById('notifList');
+  const footerEl = document.getElementById('notifFooter');
+  if (alerts.length === 0) {
+    listEl.innerHTML = '<div class="notif-empty">✅ No active alerts — you\'re all good!</div>';
+    footerEl.style.display = 'none';
+  } else {
+    listEl.innerHTML = alerts.map(a => `
+      <div class="notif-item">
+        <div class="notif-icon ${a.level}">${a.icon}</div>
+        <div class="notif-text">
+          <div><strong>${a.title}</strong> — ${a.detail}</div>
+          <div class="notif-sub">${a.sub}</div>
+        </div>
+      </div>
+    `).join('');
+    footerEl.style.display = '';
+  }
+
+  // Fire browser notifications for danger items (once per session)
+  if (dangerCount > 0 && !window._notifsFired && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+    window._notifsFired = true;
+    try {
+      const dangerAlerts = alerts.filter(a => a.level === 'danger');
+      if (dangerAlerts.length <= 3) {
+        dangerAlerts.forEach(a => {
+          new Notification('Rx Manager — ' + a.title, { body: a.detail, icon: '💊', tag: a.key });
+        });
+      } else {
+        new Notification('Rx Manager', { body: `${dangerCount} urgent alerts need your attention`, icon: '💊', tag: 'rx-summary' });
+      }
+    } catch(e) {}
+  }
+}
+
+function toggleNotifPanel() {
+  const panel = document.getElementById('notifPanel');
+  const overlay = document.getElementById('notifOverlay');
+  const isOpen = panel.classList.contains('open');
+  panel.classList.toggle('open', !isOpen);
+  overlay.classList.toggle('open', !isOpen);
+}
+
+function dismissAllAlerts() {
+  const conflicts = getConflicts();
+  const keys = [];
+  state.drugs.forEach(d => {
+    const s = calcDrugStatus(d);
+    if (s.status === 'danger') keys.push(`danger-${d.id}`);
+  });
+  conflicts.forEach(c => keys.push(`conflict-${c.drug.id}-${c.trip.id}-${c.type}`));
+  state.dismissedAlerts = keys;
+  toggleNotifPanel();
+  render();
+}
+
+function enableBrowserNotifications() {
+  if (typeof Notification === 'undefined' || !('Notification' in window)) {
+    alert('Your browser doesn\'t support notifications. Try Chrome or Firefox.');
+    return;
+  }
+  try {
+    if (Notification.permission === 'granted') {
+      alert('Notifications are already enabled! You\'ll get alerts when urgent renewals come up.');
+      return;
+    }
+    if (Notification.permission === 'denied') {
+      alert('Notifications were previously blocked. Please enable them in your browser settings for this page.');
+      return;
+    }
+    Notification.requestPermission().then(perm => {
+      if (perm === 'granted') {
+        new Notification('Rx Manager', { body: 'Notifications enabled! You\'ll be alerted about urgent prescriptions.', icon: '💊' });
+        scheduleDailyCheck();
+      }
+    });
+  } catch(e) { alert('Notifications not supported on this device.'); }
+}
+
+function scheduleDailyCheck() {
+  // Check every 6 hours while page is open
+  setInterval(() => {
+    window._notifsFired = false; // allow re-fire
+    renderAlerts();
+  }, 6 * 60 * 60 * 1000);
+}
+
+function renderDrugList() {
+  const el = document.getElementById('drugList');
+  if (state.drugs.length === 0) {
+    el.innerHTML = '<div class="empty-state">No medications added yet. Click <strong>+ Add Medication</strong> to get started.</div>';
+    return;
+  }
+  const rows = state.drugs.map(d => {
+    const s = calcDrugStatus(d);
+    const pct = Math.min(100, s.supplyPct);
+    return `<tr>
+      <td><strong>${d.name}</strong><br><span style="font-size:12px;color:var(--text-secondary)">${d.dosage} · ${freqLabel(d.frequency)}</span></td>
+      <td>
+        <div style="font-size:13px;font-weight:500;">${s.currentPills} pills</div>
+        <div class="progress-bar" style="margin-top:4px;"><div class="fill ${s.status}" style="width:${pct}%"></div></div>
+      </td>
+      <td>${s.daysLeft === Infinity ? '—' : s.daysLeft + ' days'}</td>
+      <td>${formatDate(s.runOutDate)}</td>
+      <td><span class="status-badge ${s.status === 'ok' ? 'ok' : s.status}">${s.status === 'ok' ? '✓ Good' : s.status === 'warning' ? '⚡ Renew Soon' : '⚠️ Urgent'}</span></td>
+      <td>${d.refills} refill${d.refills!==1?'s':''}</td>
+      <td style="white-space:nowrap;">
+        <button class="btn-icon" title="Record refill" onclick="openRefill(${d.id})">💊</button>
+        <button class="btn-icon" title="Edit" onclick="openEditDrug(${d.id})">✏️</button>
+        <button class="btn-icon" title="Delete" onclick="deleteDrug(${d.id})">🗑️</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  el.innerHTML = `<table class="drug-table">
+    <thead><tr><th>Medication</th><th>Supply</th><th>Days Left</th><th>Runs Out</th><th>Status</th><th>Refills</th><th></th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+function renderTimeline() {
+  const el = document.getElementById('timelineContent');
+  if (state.drugs.length === 0) {
+    el.innerHTML = '<div class="empty-state">No medications added yet. Add some to see your visual timeline.</div>';
+    return;
+  }
+
+  const nowStr = today();
+  const nowDate = new Date(nowStr + 'T00:00:00');
+  // Timeline spans 6 months
+  const endDate = new Date(nowDate);
+  endDate.setMonth(endDate.getMonth() + 6);
+  const totalDays = Math.ceil((endDate - nowDate) / 86400000);
+
+  // Build month columns
+  const months = [];
+  const d = new Date(nowDate.getFullYear(), nowDate.getMonth(), 1);
+  while (d <= endDate) {
+    const mStart = new Date(Math.max(d.getTime(), nowDate.getTime()));
+    const mEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+    const mEndClamped = new Date(Math.min(mEnd.getTime(), endDate.getTime()));
+    months.push({
+      label: d.toLocaleString('default', { month: 'short', year: 'numeric' }),
+      startDay: Math.max(0, Math.ceil((mStart - nowDate) / 86400000)),
+      endDay: Math.ceil((mEndClamped - nowDate) / 86400000)
+    });
+    d.setMonth(d.getMonth() + 1);
+    d.setDate(1);
+  }
+
+  function dayToPercent(day) { return Math.max(0, Math.min(100, (day / totalDays) * 100)); }
+  function dateToDay(dateStr) {
+    const dt = new Date(dateStr + 'T00:00:00');
+    return Math.ceil((dt - nowDate) / 86400000);
+  }
+
+  // Upcoming trips
+  const upcomingTrips = state.trips.filter(t => t.endDate >= nowStr).sort((a,b) => a.startDate.localeCompare(b.startDate));
+  const conflicts = getConflicts();
+  const rules = state.insuranceRules;
+  const stabilityDays = rules.length > 0 ? Math.max(...rules.map(r => r.windowDays || 90)) : 90;
+
+  // Legend
+  let html = `<div class="gantt-legend">
+    <div class="gantt-legend-item"><div class="gantt-legend-swatch" style="background:var(--success);"></div> Good supply</div>
+    <div class="gantt-legend-item"><div class="gantt-legend-swatch" style="background:var(--warning);"></div> Renew soon</div>
+    <div class="gantt-legend-item"><div class="gantt-legend-swatch" style="background:var(--danger);"></div> Urgent / Out</div>
+    <div class="gantt-legend-item"><div class="gantt-legend-swatch" style="background:repeating-linear-gradient(45deg,#90caf9,#90caf9 3px,#bbdefb 3px,#bbdefb 6px);"></div> PRN / As needed</div>
+    <div class="gantt-legend-item"><div class="gantt-legend-swatch" style="background:rgba(30,136,229,.12);border:1px solid rgba(30,136,229,.4);"></div> Trip</div>
+    <div class="gantt-legend-item"><span style="font-size:12px;">⚠️</span> Conflict</div>
+  </div>`;
+
+  // Chart container
+  html += `<div class="gantt-container">`;
+
+  // Header row with months
+  html += `<div class="gantt-header">
+    <div class="gantt-label-col"></div>
+    <div class="gantt-chart-col">
+      ${months.map(m => {
+        const w = dayToPercent(m.endDay) - dayToPercent(m.startDay);
+        return `<div class="gantt-month" style="width:${w}%;flex:none;">${m.label}</div>`;
+      }).join('')}
+    </div>
+  </div>`;
+
+  // Body
+  html += `<div class="gantt-body" id="ganttBody">`;
+
+  // Helper: render trip bands + today + grid lines inside a chart cell
+  function chartOverlays() {
+    let s = '';
+    // Month grid lines
+    months.forEach((m, i) => {
+      if (i > 0) s += `<div class="gantt-grid-line" style="left:${dayToPercent(m.startDay)}%;"></div>`;
+    });
+    // Trip bands
+    upcomingTrips.forEach((t, i) => {
+      const tStart = Math.max(0, dateToDay(t.startDate));
+      const tEnd = Math.min(totalDays, dateToDay(t.endDate));
+      if (tEnd < 0 || tStart > totalDays) return;
+      const left = dayToPercent(tStart);
+      const width = dayToPercent(tEnd) - left;
+      s += `<div class="gantt-trip-band ${i % 2 === 0 ? 'even' : 'odd'}" style="left:${left}%;width:${Math.max(.3, width)}%;">
+        <div class="gantt-trip-label">${t.name}</div>
+      </div>`;
+      // Freeze zone before trip
+      if (stabilityDays > 0) {
+        const freezeStart = Math.max(0, tStart - stabilityDays);
+        const freezeLeft = dayToPercent(freezeStart);
+        const freezeWidth = left - freezeLeft;
+        if (freezeWidth > 0) {
+          s += `<div class="gantt-freeze" style="left:${freezeLeft}%;width:${freezeWidth}%;" title="${stabilityDays}-day stability window before ${t.name}"></div>`;
+        }
+      }
+    });
+    // Today line
+    s += `<div class="gantt-today" style="left:0%;"></div>`;
+    return s;
+  }
+
+  // Daily-use medications (sorted by run-out date)
+  const dailyDrugs = state.drugs.filter(dr => parseFloat(dr.frequency) > 0).sort((a,b) => {
+    const sa = calcDrugStatus(a), sb = calcDrugStatus(b);
+    return (sa.daysLeft || 0) - (sb.daysLeft || 0);
+  });
+  const prnDrugs = state.drugs.filter(dr => parseFloat(dr.frequency) <= 0);
+
+  if (dailyDrugs.length > 0) {
+    html += `<div class="gantt-section-label"><span>Daily Medications</span></div>`;
+    dailyDrugs.forEach(dr => {
+      const s = calcDrugStatus(dr);
+      const barEnd = Math.min(totalDays, s.daysLeft);
+      const barWidth = dayToPercent(barEnd);
+      const barClass = s.status;
+      // Conflict markers for this drug
+      const drugConflicts = conflicts.filter(c => c.drug.id === dr.id);
+      let markers = '';
+      drugConflicts.forEach(c => {
+        let markerDay;
+        if (c.type === 'runout_during_trip') {
+          markerDay = dateToDay(s.runOutDate);
+        } else if (c.type === 'renewal_in_freeze') {
+          markerDay = dateToDay(s.renewByDate);
+        } else if (c.type === 'insufficient_supply') {
+          markerDay = dateToDay(c.trip.startDate);
+        } else {
+          markerDay = dateToDay(c.trip.startDate);
+        }
+        if (markerDay >= 0 && markerDay <= totalDays) {
+          markers += `<div class="gantt-conflict" style="left:calc(${dayToPercent(markerDay)}% - 8px);" title="${c.message}">⚠️</div>`;
+        }
+      });
+      // Renewal marker
+      let renewMarker = '';
+      if (s.renewByDate && dateToDay(s.renewByDate) >= 0 && dateToDay(s.renewByDate) <= totalDays) {
+        renewMarker = `<div style="position:absolute;top:11px;left:${dayToPercent(dateToDay(s.renewByDate))}%;width:2px;height:18px;background:var(--warning);z-index:3;border-radius:1px;" title="Renew by ${formatDate(s.renewByDate)}"></div>`;
+      }
+
+      html += `<div class="gantt-row">
+        <div class="gantt-row-label">${dr.name.replace(/ \(.*?\)/, '')}<small>${s.currentPills} pills · ${s.daysLeft}d left · ${dr.refills} refills</small></div>
+        <div class="gantt-row-chart">
+          ${chartOverlays()}
+          <div class="gantt-bar ${barClass}" style="left:0;width:${barWidth}%;" title="${dr.name}: ${s.currentPills} pills, runs out ${formatDate(s.runOutDate)}"></div>
+          ${renewMarker}
+          ${markers}
+        </div>
+      </div>`;
+    });
+  }
+
+  if (prnDrugs.length > 0) {
+    html += `<div class="gantt-section-label"><span>PRN / As Needed</span></div>`;
+    prnDrugs.forEach(dr => {
+      html += `<div class="gantt-row">
+        <div class="gantt-row-label">${dr.name.replace(/ \(.*?\)/, '')}<small>${dr.refills} refills · As needed</small></div>
+        <div class="gantt-row-chart">
+          ${chartOverlays()}
+          <div class="gantt-bar prn" style="left:0;width:100%;"></div>
+        </div>
+      </div>`;
+    });
+  }
+
+  // Trip summary rows at bottom
+  if (upcomingTrips.length > 0) {
+    html += `<div class="gantt-section-label"><span>Upcoming Trips</span></div>`;
+    upcomingTrips.forEach(t => {
+      const tStart = Math.max(0, dateToDay(t.startDate));
+      const tEnd = Math.min(totalDays, dateToDay(t.endDate));
+      const left = dayToPercent(tStart);
+      const width = Math.max(.5, dayToPercent(tEnd) - left);
+      const tripConflicts = conflicts.filter(c => c.trip.id === t.id);
+      html += `<div class="gantt-row">
+        <div class="gantt-row-label">✈️ ${t.name}<small>${formatDate(t.startDate)} — ${formatDate(t.endDate)}${tripConflicts.length > 0 ? ' · ⚠️ ' + tripConflicts.length + ' conflict' + (tripConflicts.length>1?'s':'') : ''}</small></div>
+        <div class="gantt-row-chart">
+          ${chartOverlays()}
+          <div style="position:absolute;top:10px;left:${left}%;width:${width}%;height:20px;background:rgba(30,136,229,.25);border-radius:4px;border:1.5px solid rgba(30,136,229,.5);z-index:2;" title="${t.name}: ${formatDate(t.startDate)} — ${formatDate(t.endDate)}"></div>
+        </div>
+      </div>`;
+    });
+  }
+
+  html += `</div></div>`; // close gantt-body, gantt-container
+  el.innerHTML = html;
+}
+
+function renderTravelList() {
+  const el = document.getElementById('travelList');
+  const trips = state.trips.sort((a,b) => a.startDate.localeCompare(b.startDate));
+  if (trips.length === 0) {
+    el.innerHTML = '<div class="empty-state">No trips added. Sync your Google Calendar or add trips manually.</div>';
+    return;
+  }
+  const conflicts = getConflicts();
+  el.innerHTML = trips.map(t => {
+    const tripConflicts = conflicts.filter(c => c.trip.id === t.id);
+    const isPast = t.endDate < today();
+    return `<div class="travel-card" style="${isPast ? 'opacity:.5':''}">
+      <div class="travel-info">
+        <div class="travel-icon ${tripConflicts.length > 0 ? 'conflict' : 'upcoming'}">${tripConflicts.length > 0 ? '⚠️' : '✈️'}</div>
+        <div>
+          <div class="travel-name">${t.name}</div>
+          <div class="travel-dates">${formatDate(t.startDate)} — ${formatDate(t.endDate)} (${daysBetween(t.startDate, t.endDate)} days)${isPast ? ' · Past' : ''}</div>
+          ${tripConflicts.length > 0 ? tripConflicts.map(c => `<div style="font-size:12px;color:var(--danger);margin-top:2px;">⚠ ${c.message}</div>`).join('') : ''}
+        </div>
+      </div>
+      <button class="btn-icon" onclick="deleteTrip(${t.id})">🗑️</button>
+    </div>`;
+  }).join('');
+}
+
+function renderInsuranceRules() {
+  const el = document.getElementById('savedRules');
+  if (state.insuranceRules.length === 0) { el.innerHTML = ''; return; }
+  el.innerHTML = `<h4 style="font-size:14px;margin-bottom:8px;">Active Rules</h4>` + state.insuranceRules.map(r => `
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--bg);border-radius:8px;margin-bottom:6px;font-size:13px;">
+      <div>🛡️ <strong>${r.windowDays}-day</strong> stability window — ${r.description || 'No changes before travel'}</div>
+      <button class="btn-icon btn-sm" onclick="deleteRule(${r.id})">🗑️</button>
+    </div>
+  `).join('');
+}
+
+// ====================== HELPERS ======================
+function freqLabel(f) {
+  const map = {'0':'As needed (PRN)','1':'Once daily','2':'Twice daily','3':'Three times daily','0.5':'Every other day','0.142857':'Once weekly'};
+  return map[String(f)] || f + 'x/day';
+}
+
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  ['medications','timeline','travel','insurance'].forEach(t => {
+    document.getElementById('tab-'+t).style.display = t === name ? '' : 'none';
+  });
+}
+
+function openModal(id) { document.getElementById(id).classList.add('active'); }
+function closeModal(id) { document.getElementById(id).classList.remove('active'); }
+
+// ====================== DRUG CRUD ======================
+function openAddDrug() {
+  document.getElementById('drugModalTitle').textContent = 'Add Medication';
+  document.getElementById('drugEditId').value = '';
+  ['drugName','drugDosage','drugPillCount','drugPharmacy','drugDoctor','drugNotes'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('drugFrequency').value = '1';
+  document.getElementById('drugRefills').value = '0';
+  document.getElementById('drugPillsPerRefill').value = '90';
+  document.getElementById('drugLeadTime').value = '14';
+  document.getElementById('drugCountDate').value = today();
+  openModal('drugModal');
+}
+
+function openEditDrug(id) {
+  const d = state.drugs.find(x => x.id === id);
+  if (!d) return;
+  document.getElementById('drugModalTitle').textContent = 'Edit Medication';
+  document.getElementById('drugEditId').value = id;
+  document.getElementById('drugName').value = d.name;
+  document.getElementById('drugDosage').value = d.dosage;
+  document.getElementById('drugFrequency').value = d.frequency;
+  document.getElementById('drugPillCount').value = d.pillCount;
+  document.getElementById('drugCountDate').value = d.countDate;
+  document.getElementById('drugRefills').value = d.refills;
+  document.getElementById('drugPillsPerRefill').value = d.pillsPerRefill;
+  document.getElementById('drugPharmacy').value = d.pharmacy || '';
+  document.getElementById('drugDoctor').value = d.doctor || '';
+  document.getElementById('drugLeadTime').value = d.leadTime;
+  document.getElementById('drugNotes').value = d.notes || '';
+  openModal('drugModal');
+}
+
+function saveDrug() {
+  const editId = document.getElementById('drugEditId').value;
+  const drug = {
+    id: editId ? parseInt(editId) : genId(),
+    name: document.getElementById('drugName').value.trim(),
+    dosage: document.getElementById('drugDosage').value.trim(),
+    frequency: document.getElementById('drugFrequency').value,
+    pillCount: parseInt(document.getElementById('drugPillCount').value) || 0,
+    countDate: document.getElementById('drugCountDate').value || today(),
+    refills: parseInt(document.getElementById('drugRefills').value) || 0,
+    pillsPerRefill: parseInt(document.getElementById('drugPillsPerRefill').value) || 90,
+    pharmacy: document.getElementById('drugPharmacy').value.trim(),
+    doctor: document.getElementById('drugDoctor').value.trim(),
+    leadTime: parseInt(document.getElementById('drugLeadTime').value) || 14,
+    notes: document.getElementById('drugNotes').value.trim()
+  };
+  if (!drug.name) { alert('Please enter a medication name.'); return; }
+  if (editId) {
+    const idx = state.drugs.findIndex(x => x.id === drug.id);
+    if (idx >= 0) state.drugs[idx] = drug;
+  } else {
+    state.drugs.push(drug);
+  }
+  closeModal('drugModal');
+  render();
+}
+
+function deleteDrug(id) {
+  if (!confirm('Remove this medication?')) return;
+  state.drugs = state.drugs.filter(x => x.id !== id);
+  render();
+}
+
+// ====================== REFILL ======================
+function openRefill(drugId) {
+  const d = state.drugs.find(x => x.id === drugId);
+  if (!d) return;
+  document.getElementById('refillDrugId').value = drugId;
+  document.getElementById('refillDrugName').textContent = d.name + ' (' + d.dosage + ')';
+  document.getElementById('refillPills').value = d.pillsPerRefill;
+  document.getElementById('refillDate').value = today();
+  openModal('refillModal');
+}
+
+function recordRefill() {
+  const drugId = parseInt(document.getElementById('refillDrugId').value);
+  const pills = parseInt(document.getElementById('refillPills').value) || 0;
+  const date = document.getElementById('refillDate').value || today();
+  const d = state.drugs.find(x => x.id === drugId);
+  if (!d) return;
+
+  // Recalculate current pills and add refill
+  const s = calcDrugStatus(d);
+  d.pillCount = s.currentPills + pills;
+  d.countDate = date;
+  d.refills = Math.max(0, d.refills - 1);
+
+  closeModal('refillModal');
+  render();
+}
+
+// ====================== TRIPS ======================
+function openAddTrip() {
+  document.getElementById('tripName').value = '';
+  document.getElementById('tripStart').value = '';
+  document.getElementById('tripEnd').value = '';
+  document.getElementById('tripNotes').value = '';
+  openModal('tripModal');
+}
+
+function saveTrip() {
+  const trip = {
+    id: genId(),
+    name: document.getElementById('tripName').value.trim(),
+    startDate: document.getElementById('tripStart').value,
+    endDate: document.getElementById('tripEnd').value,
+    notes: document.getElementById('tripNotes').value.trim(),
+    source: 'manual'
+  };
+  if (!trip.name || !trip.startDate || !trip.endDate) { alert('Please fill in all trip fields.'); return; }
+  state.trips.push(trip);
+  closeModal('tripModal');
+  render();
+}
+
+function deleteTrip(id) {
+  state.trips = state.trips.filter(x => x.id !== id);
+  render();
+}
+
+// ====================== TRIPIT SYNC ======================
+function syncTripIt() {
+  alert(
+    `To re-sync your TripIt calendar:\n\n` +
+    `Ask Claude in chat: "Re-sync my TripIt trips to Rx Manager"\n\n` +
+    `Claude will fetch your latest TripIt feed and update the trips here.\n\n` +
+    `Last synced: ${state.tripItLastSync || 'Never'}`
+  );
+}
+
+function updateTripItStatus() {
+  const el = document.getElementById('tripItStatus');
+  if (!el) return;
+  const tripItTrips = state.trips.filter(t => t.source === 'tripit').length;
+  const manualTrips = state.trips.filter(t => t.source !== 'tripit').length;
+  const parts = [];
+  if (tripItTrips > 0) parts.push(`✈️ ${tripItTrips} from TripIt`);
+  if (manualTrips > 0) parts.push(`${manualTrips} manual`);
+  if (state.tripItLastSync) parts.push(`synced ${state.tripItLastSync}`);
+  el.textContent = parts.join(' · ');
+}
+
+// ====================== INSURANCE ======================
+function saveInsuranceRule() {
+  const windowDays = parseInt(document.getElementById('stabilityWindow').value) || 90;
+  const description = document.getElementById('stabilityRule').value.trim() || `No Rx changes within ${windowDays} days of departure`;
+  state.insuranceRules.push({ id: genId(), windowDays, description });
+  document.getElementById('stabilityRule').value = '';
+  render();
+}
+
+function deleteRule(id) {
+  state.insuranceRules = state.insuranceRules.filter(x => x.id !== id);
+  render();
+}
+
+function handlePolicyUpload(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  // In a real app, we'd parse the PDF/DOCX here
+  // For now, acknowledge the upload and prompt user to share with Claude
+  state.policyUploaded = true;
+  saveState();
+  const el = document.getElementById('policyRules');
+  el.style.display = '';
+  el.innerHTML = `
+    <div style="padding:16px;background:#e8f5e9;border-radius:var(--radius);font-size:13px;">
+      <strong>✓ Policy uploaded:</strong> ${file.name}<br>
+      <span style="color:var(--text-secondary);">Share this file with Claude in chat to have it extract the stability window rules and medication change restrictions automatically.</span>
+    </div>
+  `;
+}
+
+// ====================== IMPORT / EXPORT ======================
+function exportData() {
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'rx-manager-backup-' + today() + '.json';
+  a.click();
+}
+
+function importData() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json,application/json,text/plain,.txt';
+  input.onchange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const imported = JSON.parse(ev.target.result.trim());
+        state = { ...defaultState(), ...imported };
+        render();
+        alert('Data imported successfully!');
+      } catch (err) { alert('Import error: ' + err.message); }
+    };
+    reader.readAsText(file);
+  };
+  input.click();
+}
+
+// ====================== PRE-LOADED DATA (Shoppers + manual count Mar 7) ======================
+const SEED_VERSION = 10; // v10: PWA support, iPhone home screen, offline, mobile responsive
+
+function initFromShoppers() {
+  // Re-seed if version changed or no drugs yet
+  if (state.seedVersion === SEED_VERSION && state.drugs.length > 0) return;
+
+  // Clear old data on version bump
+  state.drugs = [];
+  state.nextId = 1;
+  state.dismissedAlerts = [];
+  state.seedVersion = SEED_VERSION;
+
+  const pharmacy = 'Shoppers Drug Mart — Bayview & Fleming';
+  const countDate = '2026-03-07'; // actual count date from Alec
+
+  const rxData = [
+    // ======== DAILY ORAL MEDS (verified pill counts Mar 7) ========
+    {
+      name: 'Atorvastatin Ca 10mg',
+      dosage: '10mg',
+      brand: 'ATORVASTATIN',
+      rxNumber: '9800919',
+      frequency: '1',
+      pillCount: 56,
+      pillsPerRefill: 90,
+      refills: 5,
+      doctor: 'Dr. V. Wong',
+      notes: 'Cholesterol — take 1 daily (with 20mg tab = 30mg total)'
+    },
+    {
+      name: 'Atorvastatin Ca 20mg',
+      dosage: '20mg',
+      brand: 'ATORVASTATIN',
+      rxNumber: '9802778',
+      frequency: '1',
+      pillCount: 89,
+      pillsPerRefill: 90,
+      refills: 4,
+      doctor: 'Dr. V. Wong',
+      notes: 'Cholesterol — take 1 daily (with 10mg tab = 30mg total)'
+    },
+    {
+      name: 'Lisdexamfetamine 10mg',
+      dosage: '10mg',
+      brand: 'VYVANSE (TEVA)',
+      rxNumber: '9800709',
+      frequency: '1',
+      pillCount: 12,
+      pillsPerRefill: 30,
+      refills: 0,
+      doctor: 'Dr. V. Wong',
+      notes: 'ADHD — pink capsule. Take 1 morning with 20mg cap (30mg total). 0 refills — needs new Rx'
+    },
+    {
+      name: 'Lisdexamfetamine 20mg',
+      dosage: '20mg',
+      brand: 'VYVANSE (TEVA)',
+      rxNumber: '9800701',
+      frequency: '1',
+      pillCount: 12,
+      pillsPerRefill: 30,
+      refills: 0,
+      doctor: 'Dr. V. Wong',
+      notes: 'ADHD — yellow capsule. Take 1 morning with 10mg cap (30mg total). 0 refills — needs new Rx'
+    },
+    {
+      name: 'Tadalafil (Cialis) 5mg',
+      dosage: '5mg',
+      brand: 'CIALIS',
+      rxNumber: '',
+      frequency: '1',
+      pillCount: 75,
+      pillsPerRefill: 90,
+      refills: 0,
+      notes: 'Daily use — not on Shoppers file, check Rx source'
+    },
+    {
+      name: 'Perindopril Erbumine 4mg',
+      dosage: '4mg',
+      brand: 'PERINDOPRIL',
+      rxNumber: '9799088',
+      frequency: '1',
+      pillCount: 60,
+      pillsPerRefill: 90,
+      refills: 3,
+      notes: 'Blood pressure'
+    },
+    {
+      name: 'Ranitidine HCl 150mg',
+      dosage: '150mg',
+      brand: 'MAR-RANITIDINE',
+      rxNumber: '9737628',
+      frequency: '0',               // as-needed — won't calculate run-out
+      pillCount: 180,               // "tons"
+      pillsPerRefill: 180,
+      refills: 2,
+      notes: 'Acid reflux — taken as needed (PRN)'
+    },
+    {
+      name: 'Apixaban 5mg',
+      dosage: '5mg',
+      brand: 'APIXABAN',
+      rxNumber: '9804085',
+      frequency: '2',
+      pillCount: 160,
+      pillsPerRefill: 194,
+      refills: 2,
+      doctor: 'Dr. S. Shadowitz',
+      notes: 'Blood thinner — 1 tab (5mg) twice daily (post loading dose). Rx qty 194'
+    },
+    // ======== WEEKLY INJECTION ========
+    {
+      name: 'Tirzepatide 12.5mg/0.5ml',
+      dosage: '12.5mg/0.5ml',
+      brand: 'MOUNJARO KWIKPEN',
+      rxNumber: '9802462',
+      frequency: '0',
+      pillCount: 0,
+      pillsPerRefill: 1,
+      refills: 2,
+      notes: 'Weekly injection — track refills only. READY FOR PICKUP at Shoppers'
+    },
+
+    // ======== VACCINE ========
+    {
+      name: 'Zoster Vaccine (Shingrix)',
+      dosage: 'Vaccine',
+      brand: 'SHINGRIX',
+      rxNumber: '9714073',
+      frequency: '0',
+      pillCount: 0,
+      pillsPerRefill: 1,
+      refills: 1,
+      notes: 'Dose 2 overdue since Feb 1, 2026 — schedule appointment'
+    },
+
+    // ======== TOPICALS / AS-NEEDED (from Shoppers, past refill dates) ========
+    {
+      name: 'Tretinoin 0.05%',
+      dosage: '0.05% cream',
+      brand: 'RETIN-A',
+      rxNumber: '9771014',
+      frequency: '0',
+      pillCount: 0,
+      pillsPerRefill: 1,
+      refills: 6,
+      notes: 'Skin — refill when needed'
+    },
+    {
+      name: 'Mometasone/Olopatadine',
+      dosage: '25/665mcg',
+      brand: 'RYALTRIS NASAL SPRAY',
+      rxNumber: '9738467',
+      frequency: '0',
+      pillCount: 0,
+      pillsPerRefill: 1,
+      refills: 5,
+      notes: 'Nasal spray — seasonal/as needed'
+    },
+    {
+      name: 'Efinaconazole 10%',
+      dosage: '10% topical',
+      brand: 'JUBLIA',
+      rxNumber: '9714041',
+      frequency: '0',
+      pillCount: 0,
+      pillsPerRefill: 1,
+      refills: 2,
+      notes: 'Antifungal topical — refill if still needed'
+    },
+    {
+      name: 'Terbinafine HCl 250mg',
+      dosage: '250mg',
+      brand: 'TERBINAFINE',
+      rxNumber: '9715415',
+      frequency: '0',
+      pillCount: 0,
+      pillsPerRefill: 28,
+      refills: 3,
+      notes: 'Antifungal oral — likely completed course'
+    }
+  ];
+
+  rxData.forEach(rx => {
+    state.drugs.push({
+      id: genId(),
+      name: rx.name,
+      dosage: rx.dosage,
+      frequency: rx.frequency,
+      pillCount: rx.pillCount,
+      countDate: countDate,
+      refills: rx.refills,
+      pillsPerRefill: rx.pillsPerRefill,
+      pharmacy: pharmacy,
+      doctor: rx.doctor || '',
+      leadTime: 14,
+      notes: `${rx.brand}${rx.rxNumber ? ' · Rx #' + rx.rxNumber : ''}${rx.notes ? ' · ' + rx.notes : ''}`
+    });
+  });
+
+  // ======== TRIPIT TRIPS (synced Mar 9, 2026) ========
+  state.trips = [];
+  const tripData = [
+    { name: 'Art Basel', start: '2025-12-05', end: '2025-12-09', loc: 'Miami, FL' },
+    { name: 'Sint Maarten', start: '2025-12-27', end: '2026-01-04', loc: 'Sint Maarten, Netherlands' },
+    { name: 'Nassau, Bahamas', start: '2026-02-05', end: '2026-02-10', loc: 'Nassau, Bahamas' },
+    { name: 'Blue Mountain Skiing', start: '2026-02-12', end: '2026-02-17', loc: 'The Blue Mountains, ON' },
+    { name: 'Beaver, UT — Ski with Guillons', start: '2026-02-21', end: '2026-02-25', loc: 'Beaver, UT' },
+    { name: 'Zermatt, Switzerland — Skiing', start: '2026-03-13', end: '2026-03-22', loc: 'Zermatt & Zurich, Switzerland' },
+    { name: "Aaron's 50th — Tortola + Miami", start: '2026-03-23', end: '2026-03-29', loc: 'Tortola, BVI → Miami, FL' },
+    { name: 'Hawaii', start: '2026-04-27', end: '2026-05-08', loc: 'Honolulu, HI' },
+    { name: 'Ibiza + Vienna', start: '2026-06-23', end: '2026-07-01', loc: 'Ibiza, Spain → Vienna, Austria' },
+    { name: 'Osheaga 2026', start: '2026-07-30', end: '2026-08-04', loc: 'Montreal, QC' }
+  ];
+  tripData.forEach(t => {
+    state.trips.push({ id: genId(), name: t.name, startDate: t.start, endDate: t.end, notes: t.loc, source: 'tripit' });
+  });
+
+  state.tripItUrl = 'https://www.tripit.com/feed/ical/private/F6B6210D-7A998DD450496D2D04C3D817BB19FDDA/tripit.ics';
+  state.tripItLastSync = '2026-03-09';
+  saveState();
+}
+
+initFromShoppers();
+render();
+</script>
+
+</body>
+</html>
